@@ -1,0 +1,888 @@
+---
+title: "Microbiota-based SCReening of Anal Cancer in HIV-infected individuals (SCRAtCH)"
+author: "Sajan Raju"
+date: "10/2/2023"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+---
+
+# Load R packages
+
+<br><br>
+<h4> Below mentioned R packages are used in this analyses</h4>
+
+```{r loadPackages, echo=TRUE, warning=FALSE, message=FALSE}
+library(phyloseq)
+library(qiime2R)
+library(ggplot2)
+library(knitr)
+library(microbiome)
+library(table1)
+library(ggpubr)
+library(hrbrthemes)
+library(vegan)
+library(microbiomeutilities)
+#library(microbiomeMarker)
+library(tidyverse)
+library(ggstatsplot)
+library(haven)
+library(ggsci)
+library(patchwork)
+installed.packages()[names(sessionInfo()$otherPkgs), "Version"]
+
+```
+<br><br>
+
+# Import QIIME files and metadata in R
+
+```{r importingInput, echo=TRUE, warning=FALSE, message=FALSE}
+setwd("~/OneDrive - Universitetet i Oslo/scratch_data/qiime_analysis/")
+physeq <- qza_to_phyloseq(
+  features="~/OneDrive - Universitetet i Oslo/scratch_data/qiime_analysis/table-all-dada2.qza",
+  tree="~/OneDrive - Universitetet i Oslo/scratch_data/qiime_analysis/rooted-tree.qza",
+  taxonomy="~/OneDrive - Universitetet i Oslo/scratch_data/qiime_analysis/taxonomyV3V4.qza",
+  metadata = "~/OneDrive - Universitetet i Oslo/scratch_data/qiime_analysis/hHSILnew.tsv" )
+```
+
+# ASV/OTU details
+
+```{r ASVdetail, echo=TRUE, warning=FALSE, message=FALSE}
+physeq
+
+sample_data(physeq)$HSILnew <- factor(sample_data(physeq)$HSILnew, levels = c("No_HSIL", "HSIL"))
+sample_data(physeq)$bAINcat <- factor(sample_data(physeq)$bAINcat, levels = c("Normal", "LSIL","HSIL"))
+physeq
+#saveRDS(physeq, "scratchphylo.Rdata")
+#readRDS("scratchphylo.Rdata")
+#save(physeq, file = "phylodata.RData")
+#load("data.RData")
+#Color palette to use Set2
+#(LSIL-Green) "#66C2A5" 
+#(HSIL-Red) "#FC8D62" 
+#(Normal- Blue) "#8DA0CB"
+
+```
+
+# Subset data for validation cohort
+
+<br> Subset the dataset only for the validation cohort, used deriv ==v to subset it..
+<br> Removed unwanted taxa to keep only bacteria.
+<br> Removed metadata without HSILnew info) .
+
+```{r subsetting, echo=TRUE, message=FALSE,warning=FALSE,}
+physeq_bact<-subset_samples(physeq, deriv=="v")
+physeq_bact
+physeq_bact<-subset_samples(physeq_bact, HSILnew=="HSIL"  | HSILnew=="No_HSIL")
+physeq_bact
+#physeq_bact<-subset_samples(physeq_bact, bAINcat=="HSIL"  | bAINcat=="LSIL" | bAINcat=="Normal")
+physeq_bact
+physeq_bact = subset_taxa(physeq_bact, Kingdom=="d__Bacteria")
+physeq_bact
+
+pseq<-physeq_bact
+ps1 <- prune_taxa(taxa_sums(pseq) > 0, pseq)
+ps1
+```
+
+<h4>Table showing the distribution of HSILnew groups in samples </h4> 
+
+```{r table1, echo=TRUE, message=FALSE,warning=FALSE,}
+newdata2<-meta(ps1)
+table1::table1(~ HSILnew, data = newdata2)
+
+```
+
+<br><br>
+
+# Alpha diversity - (simple box plot)
+
+<p> A comprehensive list of global indicators of the diversity showed below in  the figure, which includes various measures of richness, evenness, diversity, dominance, and rarity.
+<br>
+```{r alphall, echo=TRUE, message=FALSE,warning=FALSE,fig.height=5, fig.width=10}
+#prune_samples(physeq_bact, "validation")
+alpha_meas = c("Observed", "Chao1", "ACE", "Shannon", "InvSimpson")
+p <- plot_richness(ps1, "HSILnew", measures=alpha_meas)
+p + geom_boxplot(data=p$data, aes(x=HSILnew, y=value, color=NULL), alpha=0.1) +
+    ggtitle("Diversity measures in validation cohorts by HSIL groups") +
+    stat_compare_means(method = "wilcox.test") 
+# + geom_boxplot(width = .2, outlier.shape = NA, coef = 0)
+tab <- microbiome::alpha(ps1, index = "all")
+
+```
+<br><br>
+
+# Alpha diversity - ggstatplot  in HSIL groups
+
+```{r ggstat,echo=TRUE, message=FALSE,warning=FALSE,fig.height=5, fig.width=10}
+################## alpha diversity
+
+tab2<-estimate_richness(ps1, measures=c("Observed", "ACE", "InvSimpson", "Shannon", "Chao1", "Fisher"))
+ps1.meta <- meta(ps1)
+ps1.meta$Observed <- tab2$Observed 
+ps1.meta$Chao1 <- tab2$Chao1
+ps1.meta$ACE <- tab2$ACE
+ps1.meta$Fisher <- tab2$Fisher
+
+ps1.meta$Shannon <- tab2$Shannon 
+ps1.meta$InverseSimpson <- tab2$InvSimpson
+
+
+pfish<-ggbetweenstats(ps1.meta, x=HSILnew, y=Fisher, type = "nonparametric",plot.type = "violin")+
+  labs(
+   x = "bHSIL",
+    y = "Fisher index",
+      palette = "Set2")+
+    #title = " Fisher index")  +
+  theme(
+    axis.ticks = element_blank(),
+    axis.line = element_line(colour = "grey50"),
+    panel.grid = element_line(color = "#b4aea9"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dashed"),) 
+# + scale_color_lancet()
+#pfish
+
+pshan<-ggbetweenstats(ps1.meta, x=HSILnew, y=Shannon, type = "nonparametric",plot.type = "violin")+
+  labs(
+   x = "bHSIL",
+    y = "Shannon index",
+      palette = "Set2")+
+   # title = " Shannon diversity index")  +
+  theme(
+    axis.ticks = element_blank(),
+    axis.line = element_line(colour = "grey50"),
+    panel.grid = element_line(color = "#b4aea9"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dashed"),) 
+# + scale_color_lancet()
+#pshan
+
+pobs<-ggbetweenstats(ps1.meta, x=HSILnew, y=Observed, type = "nonparametric",plot.type = "violin")+
+  labs(
+   x = "bHSIL",
+    y = "Observed richness",
+      palette = "Set2")+
+    #title = " Observed richnes index")  +
+  theme(
+    axis.ticks = element_blank(),
+    axis.line = element_line(colour = "grey50"),
+    panel.grid = element_line(color = "#b4aea9"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dashed"),) 
+# + scale_color_lancet()
+#pobs
+
+pchao<-ggbetweenstats(ps1.meta, x=HSILnew, y=Chao1, type = "nonparametric",plot.type = "violin")+
+  labs(
+   x = "bHSIL",
+    y = "Chao1 index ",
+      palette = "Set2")+
+    #title = " Chao1 index ")  +
+  theme(
+    axis.ticks = element_blank(),
+    axis.line = element_line(colour = "grey50"),
+    panel.grid = element_line(color = "#b4aea9"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dashed"),) 
+# + scale_color_lancet()
+#pchao
+
+pace<-ggbetweenstats(ps1.meta, x=HSILnew, y=ACE, type = "nonparametric",plot.type = "violin")+
+  labs(
+   x = "bHSIL",
+    y = "ACE index ",
+      palette = "Set2")+
+    #title = " ACE index ")  +
+  theme(
+    axis.ticks = element_blank(),
+    axis.line = element_line(colour = "grey50"),
+    panel.grid = element_line(color = "#b4aea9"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dashed"),) 
+# +   scale_color_lancet()
+#pace
+
+pinv<-ggbetweenstats(ps1.meta, x=HSILnew, y=InverseSimpson, type = "nonparametric",plot.type = "violin")+
+  labs(
+   x = "bHSIL",
+    y = "Inverse Simpson index ",
+   palette = "Set2")+
+   # title = " Inverse Simpson index")  +
+  theme(
+    axis.ticks = element_blank(),
+    axis.line = element_line(colour = "grey50"),
+    panel.grid = element_line(color = "#b4aea9"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dashed"),) 
+#+   scale_color_lancet()
+#pinv
+
+
+## combining the individual plots into a single plot
+pcomb<-combine_plots(
+  list(pobs, pchao, pace, pshan,pinv, pfish),
+  plotgrid.args = list(nrow = 2),
+  annotation.args = list(
+    title = "Diversity measures in validation cohorts by HSIL groups"
+    #caption = "Source: Gapminder Foundation"
+  )
+)
+```
+
+
+```{r ggstatplot,echo=TRUE, message=FALSE,warning=FALSE,fig.height=5, fig.width=10}
+pcomb
+
+ggsave("ggstat_alpha_allplots1_validation.pdf", width = 42, height = 20, units = "cm", dpi = 600)
+ggsave("ggstat_alpha_allplots1_validation.jpg",bg="white",width=18, height=12, dpi = 500)
+
+```
+
+
+# Alpha diversity - ggstatplot  in sexual role groups
+
+```{r ggstatsex,echo=TRUE, message=FALSE,warning=FALSE,fig.height=5, fig.width=10}
+################## alpha diversity
+
+tab2<-estimate_richness(ps1, measures=c("Observed", "ACE", "InvSimpson", "Shannon", "Chao1", "Fisher"))
+ps1.meta <- meta(ps1)
+ps1.meta$Observed <- tab2$Observed 
+ps1.meta$Chao1 <- tab2$Chao1
+ps1.meta$ACE <- tab2$ACE
+ps1.meta$Fisher <- tab2$Fisher
+
+ps1.meta$Shannon <- tab2$Shannon 
+ps1.meta$InverseSimpson <- tab2$InvSimpson
+
+
+pfish<-ggbetweenstats(ps1.meta, x=sexual_roles, y=Fisher, type = "nonparametric",plot.type = "violin")+
+  labs(
+    x = "sexual_roles",
+    y = "Fisher index",
+    palette = "Set2")+
+  #title = " Fisher index")  +
+  theme(
+    axis.ticks = element_blank(),
+    axis.line = element_line(colour = "grey50"),
+    panel.grid = element_line(color = "#b4aea9"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dashed"),) 
+# + scale_color_lancet()
+#pfish
+
+pshan<-ggbetweenstats(ps1.meta, x=sexual_roles, y=Shannon, type = "nonparametric",plot.type = "violin")+
+  labs(
+    x = "sexual_roles",
+    y = "Shannon index",
+    palette = "Set2")+
+  # title = " Shannon diversity index")  +
+  theme(
+    axis.ticks = element_blank(),
+    axis.line = element_line(colour = "grey50"),
+    panel.grid = element_line(color = "#b4aea9"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dashed"),) 
+# + scale_color_lancet()
+#pshan
+
+pobs<-ggbetweenstats(ps1.meta, x=sexual_roles, y=Observed, type = "nonparametric",plot.type = "violin")+
+  labs(
+    x = "sexual_roles",
+    y = "Observed richness",
+    palette = "Set2")+
+  #title = " Observed richnes index")  +
+  theme(
+    axis.ticks = element_blank(),
+    axis.line = element_line(colour = "grey50"),
+    panel.grid = element_line(color = "#b4aea9"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dashed"),) 
+# + scale_color_lancet()
+#pobs
+
+pchao<-ggbetweenstats(ps1.meta, x=sexual_roles, y=Chao1, type = "nonparametric",plot.type = "violin")+
+  labs(
+    x = "sexual_roles",
+    y = "Chao1 index ",
+    palette = "Set2")+
+  #title = " Chao1 index ")  +
+  theme(
+    axis.ticks = element_blank(),
+    axis.line = element_line(colour = "grey50"),
+    panel.grid = element_line(color = "#b4aea9"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dashed"),) 
+# + scale_color_lancet()
+#pchao
+
+pace<-ggbetweenstats(ps1.meta, x=sexual_roles, y=ACE, type = "nonparametric",plot.type = "violin")+
+  labs(
+    x = "sexual roles",
+    y = "ACE index ",
+    palette = "Set2")+
+  #title = " ACE index ")  +
+  theme(
+    axis.ticks = element_blank(),
+    axis.line = element_line(colour = "grey50"),
+    panel.grid = element_line(color = "#b4aea9"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dashed"),) 
+# +   scale_color_lancet()
+#pace
+
+pinv<-ggbetweenstats(ps1.meta, x=sexual_roles, y=InverseSimpson, type = "nonparametric",plot.type = "violin")+
+  labs(
+    x = "sexual roles",
+    y = "Inverse Simpson index ",
+    palette = "Set2")+
+  # title = " Inverse Simpson index")  +
+  theme(
+    axis.ticks = element_blank(),
+    axis.line = element_line(colour = "grey50"),
+    panel.grid = element_line(color = "#b4aea9"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dashed"),) 
+#+   scale_color_lancet()
+#pinv
+
+
+## combining the individual plots into a single plot
+pcomb<-combine_plots(
+ # list(pobs, pchao, pace, pshan,pinv, pfish),
+  list(pobs, pchao, pshan,pinv, pfish),
+    plotgrid.args = list(nrow = 2),
+  annotation.args = list(
+    title = "Diversity measures in validation cohorts by sexual role groups"
+    #caption = "Source: Gapminder Foundation"
+  )
+)
+```
+
+
+```{r ggstatplot2,echo=TRUE, message=FALSE,warning=FALSE,fig.height=5, fig.width=10}
+pcomb
+
+#ggsave("ggstat_alpha_allplots1_sexualrole_validation.jpg",bg="white",width=16, height=8)
+ggsave("ggstat_alpha_allplots1_sexualrole_validation.pdf", width = 42, height = 20, units = "cm", dpi = 600)
+ggsave("ggstat_alpha_allplots1_sexualrole_validation.jpg",bg="white",width=18, height=12, dpi = 500)
+
+```
+
+# Alpha diversity - ggstatplot  in cAIN groups
+
+```{r ggstatain,echo=TRUE, message=FALSE,warning=FALSE,fig.height=5, fig.width=10}
+################## alpha diversity
+
+tab2<-estimate_richness(ps1, measures=c("Observed", "ACE", "InvSimpson", "Shannon", "Chao1", "Fisher"))
+ps1.meta <- meta(ps1)
+ps1.meta$Observed <- tab2$Observed 
+ps1.meta$Chao1 <- tab2$Chao1
+ps1.meta$ACE <- tab2$ACE
+ps1.meta$Fisher <- tab2$Fisher
+
+ps1.meta$Shannon <- tab2$Shannon 
+ps1.meta$InverseSimpson <- tab2$InvSimpson
+
+
+pfish<-ggbetweenstats(ps1.meta, x=cAIN, y=Fisher, type = "nonparametric",plot.type = "violin")+
+  labs(
+    x = "bHSIL",
+    y = "Fisher index",
+    palette = "Set2")+
+  #title = " Fisher index")  +
+  theme(
+    axis.ticks = element_blank(),
+    axis.line = element_line(colour = "grey50"),
+    panel.grid = element_line(color = "#b4aea9"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dashed"),) 
+# + scale_color_lancet()
+#pfish
+
+pshan<-ggbetweenstats(ps1.meta, x=cAIN, y=Shannon, type = "nonparametric",plot.type = "violin")+
+  labs(
+    x = "bHSIL",
+    y = "Shannon index",
+    palette = "Set2")+
+  # title = " Shannon diversity index")  +
+  theme(
+    axis.ticks = element_blank(),
+    axis.line = element_line(colour = "grey50"),
+    panel.grid = element_line(color = "#b4aea9"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dashed"),) 
+# + scale_color_lancet()
+#pshan
+
+pobs<-ggbetweenstats(ps1.meta, x=cAIN, y=Observed, type = "nonparametric",plot.type = "violin")+
+  labs(
+    x = "bHSIL",
+    y = "Observed richness",
+    palette = "Set2")+
+  #title = " Observed richnes index")  +
+  theme(
+    axis.ticks = element_blank(),
+    axis.line = element_line(colour = "grey50"),
+    panel.grid = element_line(color = "#b4aea9"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dashed"),) 
+# + scale_color_lancet()
+#pobs
+
+pchao<-ggbetweenstats(ps1.meta, x=cAIN, y=Chao1, type = "nonparametric",plot.type = "violin")+
+  labs(
+    x = "bHSIL",
+    y = "Chao1 index ",
+    palette = "Set2")+
+  #title = " Chao1 index ")  +
+  theme(
+    axis.ticks = element_blank(),
+    axis.line = element_line(colour = "grey50"),
+    panel.grid = element_line(color = "#b4aea9"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dashed"),) 
+# + scale_color_lancet()
+#pchao
+
+pace<-ggbetweenstats(ps1.meta, x=cAIN, y=ACE, type = "nonparametric",plot.type = "violin")+
+  labs(
+    x = "bHSIL",
+    y = "ACE index ",
+    palette = "Set2")+
+  #title = " ACE index ")  +
+  theme(
+    axis.ticks = element_blank(),
+    axis.line = element_line(colour = "grey50"),
+    panel.grid = element_line(color = "#b4aea9"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dashed"),) 
+# +   scale_color_lancet()
+#pace
+
+pinv<-ggbetweenstats(ps1.meta, x=cAIN, y=InverseSimpson, type = "nonparametric",plot.type = "violin")+
+  labs(
+    x = "bHSIL",
+    y = "Inverse Simpson index ",
+    palette = "Set2")+
+  # title = " Inverse Simpson index")  +
+  theme(
+    axis.ticks = element_blank(),
+    axis.line = element_line(colour = "grey50"),
+    panel.grid = element_line(color = "#b4aea9"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(linetype = "dashed"),) 
+#+   scale_color_lancet()
+#pinv
+
+
+## combining the individual plots into a single plot
+pcomb<-combine_plots(
+  list(pobs, pchao, pace, pshan,pinv, pfish),
+  plotgrid.args = list(nrow = 2),
+  annotation.args = list(
+    title = "Diversity measures in validation cohorts by cAIN groups"
+    #caption = "Source: Gapminder Foundation"
+  )
+)
+```
+
+
+```{r ggstatplotain,echo=TRUE, message=FALSE,warning=FALSE,fig.height=5, fig.width=10}
+pcomb
+
+#ggsave("ggstat_alpha_allplots1_cAIN_validation.jpg",bg="white",width=16, height=8)
+ggsave("ggstat_alpha_allplots1_cAIN_validation.pdf", width = 42, height = 20, units = "cm", dpi = 600)
+ggsave("ggstat_alpha_allplots1_cAIN_validation.jpg",bg="white",width=18, height=12, dpi = 500)
+
+```
+
+# Relative abundance - Family and Genus level 
+
+
+```{r taxafg, fig.height=10, fig.width=10, echo=TRUE, fig.align="center", out.extra="id=logo"}
+library(RColorBrewer)
+# Define the number of colors you want
+nb.cols <- 18
+mycolors <- colorRampPalette(brewer.pal(8, "Paired"))(nb.cols)
+
+ps2 <- ps1 %>% aggregate_top_taxa2(level = "Family", top = 10) %>% microbiome::transform(transform = "compositional")
+pseq2<-ps2
+p4 <- plot_composition(pseq2,  taxonomic.level = "Family", sample.sort = "HSILnew", group_by="HSILnew",
+                       x.label = "HSILnew") + guides(fill = guide_legend(ncol = 1)) +  
+  scale_fill_manual(values = mycolors) +
+  #scale_fill_brewer("Family", palette = "Paired") +
+  scale_y_percent() + labs(x = "Samples", y = "Relative abundance (%)",
+                           title = "Relative abundance of family in validation cohort")+ theme_ipsum(grid="Y")+ theme(axis.text.x=element_blank(), axis.ticks.x=element_blank())
+
+print(p4)
+
+ggsave("relabund_family_all_validation.jpg",bg="white",width=10, height=8)
+
+# Averaged by group
+p44 <- plot_composition(pseq2, average_by = "HSILnew", transform = "compositional") +
+  #scale_fill_brewer("Family", palette = "Paired") + 
+    scale_fill_manual(values = mycolors) +
+theme_ipsum(grid="Y") +
+  theme(axis.text.x = element_text(angle=0, hjust=1), legend.text = element_text(face = "italic"))
+
+print(p44)
+
+ggsave("relabund_family_combined_validation.jpg",bg="white",width=8, height=8)
+
+##### GENUS
+
+ps3 <- ps1 %>% aggregate_top_taxa2(level = "Genus", top = 15) %>% microbiome::transform(transform = "compositional")
+pseq2<-ps3
+p5 <- plot_composition(pseq2,  taxonomic.level = "Genus", sample.sort = "HSILnew", group_by="HSILnew",
+                       x.label = "HSILnew") + guides(fill = guide_legend(ncol = 1)) +   
+  #scale_fill_brewer("Genus", palette = "Paired") +
+  scale_fill_manual(values = mycolors) +
+  scale_y_percent() + labs(x = "Samples", y = "Relative abundance (%)",
+                           title = "Relative abundance of genus in validation cohort")+ 
+  theme_ipsum(grid="Y")+ theme(axis.text.x=element_blank(), axis.ticks.x=element_blank())
+
+print(p5)
+
+ggsave("relabund_Genus_all_validation.jpg",bg="white",width=10, height=8)
+
+# Averaged by group
+p55 <- plot_composition(pseq2, average_by = "HSILnew", transform = "compositional") +
+  #scale_fill_brewer("Genus", palette = "Paired") +
+    scale_fill_manual(values = mycolors) +
+theme_ipsum(grid="Y") +
+  theme(axis.text.x = element_text(angle=0, hjust=1), legend.text = element_text(face = "italic"))
+
+print(p55)
+
+ggsave("relabund_Genus_combined_validation.jpg",bg="white",width=8, height=8)
+
+```
+# Relative abundance - phyla level 
+
+```{r taxaphy, fig.height=10, fig.width=10, echo=TRUE, fig.align="center", out.extra="id=logo"}
+transform <- microbiome::transform
+# Merge rare taxa to speed up examples
+pseq <- transform(ps1, "compositional")
+pseq <- aggregate_rare(pseq, level = "Phylum", detection = 0.1/100, prevalence = 20/100)
+pseq2<-pseq
+p4 <- plot_composition(pseq2,
+                       taxonomic.level = "Phylum",
+                       sample.sort = "HSILnew", group_by="HSILnew",
+                       x.label = "HSILnew") +
+  guides(fill = guide_legend(ncol = 1)) +   scale_fill_brewer("Phylum", palette = "Paired") +
+  scale_y_percent() +
+  labs(x = "Samples", y = "Relative abundance (%)",
+       title = "Relative abundance of taxonomic phylum")+
+       #subtitle = "in validation cohort",
+       #caption = "HSIL groups.") + 
+  theme_ipsum(grid="Y")+ 
+  #theme(axis.text.x = element_text(angle=90, hjust=1))+
+  theme(axis.text.x=element_blank(), axis.ticks.x=element_blank())
+print(p4)
+
+# Averaged by group
+p44 <- plot_composition(pseq2,
+                      average_by = "HSILnew", 
+                      transform = "compositional") +
+  scale_fill_brewer("Phylum", palette = "Paired") +
+  theme_ipsum(grid="Y") +
+  theme(axis.text.x = element_text(angle=0, hjust=1),
+        legend.text = element_text(face = "italic"))
+print(p44)
+
+
+```
+
+# Relative abundance - Family level 
+
+<br>
+```{r taxafamily, fig.height=10, fig.width=10, echo=TRUE, fig.align="center", out.extra="id=logo"}
+transform <- microbiome::transform
+# Merge rare taxa to speed up examples
+pseq <- transform(ps1, "compositional")
+pseq <- aggregate_rare(pseq, level = "Family", detection = 1/100, prevalence = 50/100)
+pseq22<-pseq
+p45 <- plot_composition(pseq22,
+                       taxonomic.level = "Family",
+                       sample.sort = "HSILnew", group_by="HSILnew",
+                       x.label = "HSILnew") +
+  guides(fill = guide_legend(ncol = 1)) + scale_fill_brewer("Family", palette = "Paired") +
+  scale_y_percent() +
+  labs(x = "Samples", y = "Relative abundance (%)",
+       title = "Relative abundance of taxonomic family")+
+       #subtitle = "in validation cohort",
+       #caption = "HSIL groups.") + 
+  theme_ipsum(grid="Y")+ 
+  #theme(axis.text.x = element_text(angle=90, hjust=1))+
+  theme(axis.text.x=element_blank(), axis.ticks.x=element_blank())
+print(p45)
+
+# Averaged by group
+p46 <- plot_composition(pseq22,
+                      average_by = "HSILnew", 
+                      transform = "compositional") +
+  scale_fill_brewer("Phylum", palette = "Paired") +
+  theme_ipsum(grid="Y") +
+  theme(axis.text.x = element_text(angle=0, hjust=1),
+        legend.text = element_text(face = "italic"))
+print(p46)
+
+
+```
+<br><br>
+
+# Betadiversity in HSIL groups
+
+<br>PERMANOVA quantifies multivariate community-level differences between groups.
+<br>Permanova analysis used on unifrac distances and showed it in a NMDS plot. <br>
+```{r betahsil, echo=TRUE, message=FALSE, warning=FALSE}
+ordu.unwt.uni <- ordinate(ps1, "NMDS", "unifrac", weighted=F)
+
+# check for Eigen values
+# barplot(ordu.unwt.uni$values$Eigenvalues[1:10])
+
+unwt.unifrac <- plot_ordination(ps1, ordu.unwt.uni, color="HSILnew")+ 
+                                stat_ellipse(aes(group = HSILnew), linetype = 2)
+unwt.unifrac <- unwt.unifrac + ggtitle("Unweighted UniFrac") + geom_point(size = 2.5)
+            
+unwt.unifrac <- unwt.unifrac + theme_classic() + scale_color_brewer("HSILnew", palette = "Set2")
+print(unwt.unifrac)
+ggsave("betadiv_nmds_HSIL_validation.jpg",bg="white")
+ggsave("betadiv_nmds_HSIL_validation.pdf")
+
+metadf <- data.frame(sample_data(ps1))
+
+unifrac.dist <- UniFrac(ps1,
+                        weighted = TRUE,
+                        normalized = TRUE,
+                        parallel = FALSE,
+                        fast = TRUE)
+#Permanova analysis using Vegan (adonis)
+permanova <- adonis2(unifrac.dist ~ HSILnew, data = metadf)
+
+permanova
+```
+
+## betadispersion
+
+Vegan::betadisper: Multivariate homogeneity of groups dispersions (variances)
+
+```{r betadisphsil, echo=TRUE, message=FALSE, warning=FALSE}
+beta2 <- betadisper(unifrac.dist, metadf$HSILnew)
+permutest(beta2)
+
+plot(beta2, main = "Ordination Centroids and Dispersion Labeled: Unweighted Unifrac Distance", sub = "")  
+
+jpeg(file="centroiddisperHSILnew_validation.jpeg")
+plot(beta2, main = "Ordination Centroids and Dispersion Labeled: Unweighted Unifrac Distance", sub = "")  
+dev.off()
+
+boxplot(beta2, main = "", xlab = "")
+
+jpeg(file="centroidboxplotHSILnew_validation.jpeg")
+boxplot(beta2, main = "", xlab = "")
+dev.off()
+
+
+
+```
+
+# Betadiversity in bAINcat groups
+
+```{r betabaincat, echo=TRUE, message=FALSE, warning=FALSE}
+#ordu.unwt.uni <- ordinate(ps1, "NMDS", "unifrac", weighted=F)
+# check for Eigen values
+# barplot(ordu.unwt.uni$values$Eigenvalues[1:10])
+
+psbAIN<-subset_samples(ps1, bAINcat=="HSIL"  | bAINcat=="LSIL" | bAINcat=="Normal")
+ordu.unwt.uni <- ordinate(psbAIN, "NMDS", "unifrac", weighted=F)
+
+unwt.unifrac <- plot_ordination(psbAIN, ordu.unwt.uni, color="bAINcat")+ 
+  stat_ellipse(aes(group = bAINcat), linetype = 2)
+unwt.unifrac <- unwt.unifrac + ggtitle("Unweighted UniFrac") + geom_point(size = 2.5)+
+  scale_color_manual(values=c('#8DA0CB','#66C2A5', '#FC8D62'))
+unwt.unifrac <- unwt.unifrac + theme_classic() 
+
+print(unwt.unifrac)
+ggsave("betadiv_nmds_bIANcat1_validation.jpg",bg="white")
+ggsave("betadiv_nmds_bIANcat1_validation.pdf")
+
+metadf <- data.frame(sample_data(psbAIN))
+
+unifrac.dist <- UniFrac(psbAIN,
+                        weighted = TRUE,
+                        normalized = TRUE,
+                        parallel = FALSE,
+                        fast = TRUE)
+#Permanova analysis using Vegan (adonis)
+permanova <- adonis2(unifrac.dist ~ bAINcat, data = metadf)
+permanova
+```
+
+## Betadispersion
+
+Vegan::betadisper: Multivariate homogeneity of groups dispersions (variances)
+
+```{r betadispbaincat, echo=TRUE, message=FALSE, warning=FALSE}
+beta2 <- betadisper(unifrac.dist, metadf$bAINcat)
+permutest(beta2)
+
+plot(beta2, main = "Ordination Centroids and Dispersion Labeled: Unweighted Unifrac Distance", sub = "")  
+
+jpeg(file="centroiddisperbAINcat_validation.jpeg")
+plot(beta2, main = "Ordination Centroids and Dispersion Labeled: Unweighted Unifrac Distance", sub = "")  
+dev.off()
+
+boxplot(beta2, main = "", xlab = "")
+
+jpeg(file="centroidboxplotbAINcat_validation.jpeg")
+boxplot(beta2, main = "", xlab = "")
+dev.off()
+
+plot(TukeyHSD(beta2))
+
+```
+
+# Betadiversity in sexual role groups
+
+<br>PERMANOVA quantifies multivariate community-level differences between groups.
+<br>Permanova analysis used on unifrac distances and showed it in a NMDS plot. <br>
+```{r beta_sexrole, echo=TRUE, message=FALSE, warning=FALSE}
+pssexr<-subset_samples(ps1, sexual_roles=="Both"  | sexual_roles=="Active" | sexual_roles=="Passive")
+
+ordu.unwt.uni <- ordinate(pssexr, "NMDS", "unifrac", weighted=F)
+
+# check for Eigen values
+# barplot(ordu.unwt.uni$values$Eigenvalues[1:10])
+
+unwt.unifrac <- plot_ordination(pssexr, ordu.unwt.uni, color="sexual_roles")+ 
+  stat_ellipse(aes(group = sexual_roles), linetype = 2)
+unwt.unifrac <- unwt.unifrac + ggtitle("Unweighted UniFrac") + geom_point(size = 2.5)
+
+unwt.unifrac <- unwt.unifrac + theme_classic() + scale_color_brewer("sexual_roles", palette = "Set2")
+print(unwt.unifrac)
+ggsave("betadiv_nmds_HSIL_validation__sexrole_.jpg",bg="white")
+ggsave("betadiv_nmds_HSIL_validation__sexrole_.pdf")
+
+metadf <- data.frame(sample_data(pssexr))
+
+unifrac.dist <- UniFrac(pssexr,
+                        weighted = TRUE,
+                        normalized = TRUE,
+                        parallel = FALSE,
+                        fast = TRUE)
+#Permanova analysis using Vegan (adonis)
+permanova <- adonis2(unifrac.dist ~ sexual_roles, data = metadf)
+
+permanova
+```
+
+## betadispersion
+
+Vegan::betadisper: Multivariate homogeneity of groups dispersions (variances)
+
+```{r betadisp_sexrole, echo=TRUE, message=FALSE, warning=FALSE}
+beta2 <- betadisper(unifrac.dist, metadf$sexual_roles)
+permutest(beta2)
+
+plot(beta2, main = "Ordination Centroids and Dispersion Labeled: Unweighted Unifrac Distance", sub = "")  
+
+jpeg(file="centroiddispersexual_roles_validation.jpeg")
+plot(beta2, main = "Ordination Centroids and Dispersion Labeled: Unweighted Unifrac Distance", sub = "")  
+dev.off()
+
+boxplot(beta2, main = "", xlab = "")
+
+jpeg(file="centroidboxplotsexual_roles_validation.jpeg")
+boxplot(beta2, main = "", xlab = "")
+dev.off()
+
+```
+
+
+# Differntial abundance - ASV level- DESeq2
+
+```{r deseqphy, echo=TRUE, message=FALSE, error = FALSE,warning=FALSE}
+
+library(DESeq2)
+library(ggrepel)
+diagdds = phyloseq_to_deseq2(ps1, ~ HSILnew)
+
+diagdds$HSILnew <- relevel(diagdds$HSILnew, ref = "No_HSIL")
+
+dds<-estimateSizeFactors(diagdds, type = 'poscounts')
+#dds <- DESeq(dds, test="Wald")
+dds = DESeq(dds, test="Wald", fitType="parametric")
+
+res = results(dds, cooksCutoff = FALSE)
+alpha = 0.05
+#res
+sigtab1 = res[which(res$padj < alpha), ]
+sigtab1 = cbind(as(sigtab1, "data.frame"), as(tax_table(ps1)[rownames(sigtab1), ], "matrix"))
+head(sigtab1,20)
+
+sigtab =as.data.frame(res)
+merged <- cbind(sigtab,tax_table(ps1))
+
+# add a column of NAs
+merged$diffexpressed <- "NO"
+# if log2Foldchange > 0.6 and pvalue < 0.05, set as "UP" 
+merged$diffexpressed[merged$log2FoldChange > 0.6 & merged$pvalue < 0.05] <- "UP"
+# if log2Foldchange < -0.6 and pvalue < 0.05, set as "DOWN"
+merged$diffexpressed[merged$log2FoldChange < -0.6 & merged$pvalue < 0.05] <- "DOWN"
+
+pvolc<-ggplot( merged, aes(x=log2FoldChange, y= -log10(pvalue),col=diffexpressed)) + geom_point()+theme_minimal(base_size = 12, base_rect_size = 5)+ 
+  geom_vline(xintercept=c(-2.5, 2.5), col="black", linetype="dashed") +  
+  geom_hline(yintercept=-log10(0.05), col="blue", linetype= "dashed")+ scale_color_manual(values=c("dark green", "black", "dark red"))+ scale_y_continuous(breaks = seq(0, 45, by = 5))
+
+pvolc
+  #geom_text_repel(data=merged, aes(label=Genus))
+ggsave("volcanopltdeseq_hsil_validation.jpg",bg="white")
+
+```
+
+##  Differntial abundance analysis using LEFSE
+
+```{r lefseFDR, echo=TRUE, message=FALSE, error = FALSE,warning=FALSE}
+#   library(microbiomeMarker)
+#   mm_lefse <- run_lefse(
+#   ps1,  taxa_rank = "Genus",
+#   wilcoxon_cutoff = 0.05,
+#   group = "HSILnew",
+#   kw_cutoff = 0.01,
+#   multigrp_strat = TRUE,
+#   strict=("1"),
+#   lda_cutoff = 2
+# )
+# 
+# mm_lefse
+# marker_table(mm_lefse)
+#plot_ef_bar(mm_lefse) + scale_color_brewer("HSILnew", palette = "Set2")
+# #+ scale_fill_manual(values =c("below" = "#00bfc4", "above" = "#F8766D"))
+```
+
+# R session information
+```{r}
+sessionInfo()
+```
